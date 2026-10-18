@@ -11,20 +11,20 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Install Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: '8.7'
 
@@ -33,12 +33,13 @@ jobs:
           echo "===== Repository files ====="
           ls -la
           echo "===== ZIP files ====="
-          find . -maxdepth 3 -type f -name '*.zip'
+          find . -maxdepth 4 -type f -name '*.zip'
 
       - name: Extract Android project
         shell: bash
         run: |
-          ZIP_FILE="$(find . -maxdepth 3 -type f -name 'void_os_android_project.zip' -print -quit)"
+          ZIP_FILE="$(find . -maxdepth 4 -type f \
+            -name 'void_os_android_project.zip' -print -quit)"
 
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: 找不到 void_os_android_project.zip"
@@ -49,7 +50,7 @@ jobs:
           unzip -o "$ZIP_FILE" -d source
 
           echo "===== Extracted files ====="
-          find source -maxdepth 6 -type f | sort | head -300
+          find source -maxdepth 5 -type f | sort | head -200
 
       - name: Find Android project
         id: locate
@@ -62,7 +63,9 @@ jobs:
           if [ -n "$WRAPPER" ]; then
             ROOT="$(dirname "$WRAPPER")"
           else
-            SETTINGS="$(find source -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
+            SETTINGS="$(find source -type f \
+              \( -name settings.gradle \
+              -o -name settings.gradle.kts \) -print -quit)"
 
             if [ -n "$SETTINGS" ]; then
               ROOT="$(dirname "$SETTINGS")"
@@ -71,7 +74,7 @@ jobs:
 
           if [ -z "$ROOT" ]; then
             echo "ERROR: ZIP 中没有找到 gradlew 或 settings.gradle"
-            echo "请检查 ZIP 是否包含完整的 Android 项目。"
+            echo "请检查 ZIP 内是否包含完整 Android 项目。"
             exit 1
           fi
 
@@ -86,9 +89,9 @@ jobs:
 
           if [ -f ./gradlew ]; then
             chmod +x ./gradlew
-            ./gradlew --no-daemon assembleDebug
+            ./gradlew --no-daemon assembleDebug --stacktrace
           else
-            gradle --no-daemon assembleDebug
+            gradle --no-daemon assembleDebug --stacktrace
           fi
 
       - name: Upload APK
