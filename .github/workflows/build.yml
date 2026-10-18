@@ -1,0 +1,41 @@
+name: Build VOID OS APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Extract project
+        run: |
+          mkdir source
+          unzip void_os_android_project.zip -d source
+          find source -name gradlew -type f
+
+      - name: Build APK
+        run: |
+          GRADLEW=$(find source -name gradlew -type f | head -n 1)
+          if [ -z "$GRADLEW" ]; then
+            echo "找不到 gradlew，请检查 ZIP 内容"
+            exit 1
+          fi
+          cd "$(dirname "$GRADLEW")"
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: VOID-OS-APK
+          path: source/**/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
