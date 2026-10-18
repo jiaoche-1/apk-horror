@@ -5,10 +5,14 @@ on:
   push:
     branches:
       - main
-      
+
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,26 +23,77 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Extract project
+      - name: Check uploaded files
         run: |
-          mkdir source
-          unzip void_os_android_project.zip -d source
-          find source -name gradlew -type f
+          echo "===== Repository files ====="
+          find . -maxdepth 4 -type f | sort | head -300
+          echo "===== ZIP files ====="
+          find . -type f -name '*.zip' -print
 
-      - name: Build APK
+      - name: Extract Android project ZIP
         run: |
-          GRADLEW=$(find source -name gradlew -type f | head -n 1)
-          if [ -z "$GRADLEW" ]; then
-            echo "找不到 gradlew，请检查 ZIP 内容"
+          ZIP_FILE="$(find . -maxdepth 3 -type f -name 'void_os_android_project.zip' | head -n 1)"
+
+          if [ -z "$ZIP_FILE" ]; then
+            ZIP_FILE="$(find . -maxdepth 3 -type f -name '*.zip' | head -n 1)"
+          fi
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: 仓库里没有找到 ZIP 文件。"
             exit 1
           fi
-          cd "$(dirname "$GRADLEW")"
-          chmod +x gradlew
-          ./gradlew assembleDebug
+
+          mkdir -p source
+          unzip -o "$ZIP_FILE" -d source
+
+          echo "===== Extracted project files ====="
+          find source -maxdepth 6 -type f | sort | head -400
+
+      - name: Locate Gradle project
+        id: locate
+        shell: bash
+        run: |
+          ROOT=""
+
+          WRAPPER="$(find source -type f -name gradlew -print -quit)"
+
+          if [ -n "$WRAPPER" ]; then
+            ROOT="$(dirname "$WRAPPER")"
+          else
+            SETTINGS="$(find source -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
+
+            if [ -n "$SETTINGS" ]; then
+              ROOT="$(dirname "$SETTINGS")"
+            fi
+          fi
+
+          if [ -z "$ROOT" ]; then
+            echo "ERROR: ZIP 内没有 gradlew，也没有 settings.gradle/settings.gradle.kts。"
+            echo "请检查上传的 ZIP 是否为完整 Android Studio 项目。"
+            exit 1
+          fi
+
+          echo "project_root=$ROOT" >> "$GITHUB_OUTPUT"
+          echo "Project root: $ROOT"
+
+      - name: Build debug APK
+        working-directory: ${{ steps.locate.outputs.project_root }}
+        run: |
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon assembleDebug
+          else
+            echo "ERROR: 找到 Gradle 项目，但缺少 gradlew Wrapper 文件。"
+            exit 1
+          fi
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: VOID-OS-APK
-          path: source/**/app/build/outputs/apk/debug/*.apk
+          path: |
+            source/**/build/outputs/apk/debug/*.apk
+            source/**/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 7
