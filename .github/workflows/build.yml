@@ -29,15 +29,19 @@ jobs:
           gradle-version: '8.7'
 
       - name: Check repository
+        shell: bash
         run: |
           echo "===== Repository files ====="
           ls -la
+
           echo "===== ZIP files ====="
           find . -maxdepth 4 -type f -name '*.zip'
 
       - name: Extract Android project
         shell: bash
         run: |
+          set -e
+
           ZIP_FILE="$(find . -maxdepth 4 -type f \
             -name 'void_os_android_project.zip' -print -quit)"
 
@@ -50,12 +54,46 @@ jobs:
           unzip -o "$ZIP_FILE" -d source
 
           echo "===== Extracted files ====="
-          find source -maxdepth 5 -type f | sort | head -200
+          find source -maxdepth 6 -type f | sort | head -300
+
+      - name: Fix Gradle file line endings
+        shell: bash
+        run: |
+          set -e
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          root = Path("source")
+
+          for name in (
+              "settings.gradle",
+              "build.gradle",
+              "settings.gradle.kts",
+              "build.gradle.kts",
+          ):
+              for p in root.rglob(name):
+                  text = p.read_text(encoding="utf-8-sig")
+
+                  # 修复被错误写成普通字符的 \n 和 \r\n
+                  text = text.replace("\\r\\n", "\n")
+                  text = text.replace("\\n", "\n")
+                  text = text.replace("\\r", "\n")
+
+                  p.write_text(text, encoding="utf-8")
+                  print(f"已检查文件：{p}")
+          PY
+
+          echo "===== settings.gradle ====="
+          find source -type f -name settings.gradle \
+            -exec sh -c 'echo "---- $1"; sed -n "1,100p" "$1"' _ {} \;
 
       - name: Find Android project
         id: locate
         shell: bash
         run: |
+          set -e
+
           ROOT=""
 
           WRAPPER="$(find source -type f -name gradlew -print -quit)"
@@ -73,25 +111,69 @@ jobs:
           fi
 
           if [ -z "$ROOT" ]; then
-            echo "ERROR: ZIP 中没有找到 gradlew 或 settings.gradle"
-            echo "请检查 ZIP 内是否包含完整 Android 项目。"
+            echo "ERROR: 没有找到 gradlew 或 settings.gradle"
+            echo "请确认 ZIP 中包含完整的 Android Gradle 项目。"
             exit 1
           fi
 
           echo "project_root=$ROOT" >> "$GITHUB_OUTPUT"
           echo "项目路径：$ROOT"
 
+      - name: Check Android project configuration
+        shell: bash
+        run: |
+          set -e
+
+          ROOT="${{ steps.locate.outputs.project_root }}"
+
+          echo "===== Project root ====="
+          echo "$ROOT"
+
+          echo "===== Project files ====="
+          find "$ROOT" -maxdepth 4 -type f | sort | head -300
+
+          if [ ! -f "$ROOT/settings.gradle" ] && \
+             [ ! -f "$ROOT/settings.gradle.kts" ]; then
+            echo "ERROR: 缺少 settings.gradle"
+            exit 1
+          fi
+
+          if [ ! -f "$ROOT/build.gradle" ] && \
+             [ ! -f "$ROOT/build.gradle.kts" ]; then
+            echo "ERROR: 缺少根目录 build.gradle"
+            exit 1
+          fi
+
       - name: Build APK
         shell: bash
         run: |
+          set -e
+
           ROOT="${{ steps.locate.outputs.project_root }}"
           cd "$ROOT"
 
-          if [ -f ./gradlew ]; then
+          echo "===== Start Gradle build ====="
+
+          if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
             ./gradlew --no-daemon assembleDebug --stacktrace
           else
             gradle --no-daemon assembleDebug --stacktrace
+          fi
+
+      - name: Find generated APK
+        if: success()
+        shell: bash
+        run: |
+          echo "===== APK files ====="
+
+          find source -type f -name '*.apk' -print
+
+          if ! find source -type f \
+            -path '*/build/outputs/apk/debug/*.apk' \
+            -print -quit | grep -q .; then
+            echo "ERROR: 没有找到 Debug APK"
+            exit 1
           fi
 
       - name: Upload APK
